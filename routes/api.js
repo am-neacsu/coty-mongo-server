@@ -28,10 +28,16 @@ router.get('/competitors', async (req, res) => {
 });
 
 router.post('/competitors', async (req, res) => {
-  const competitor = new Competitor({ name: req.body.name });
+  const { name, category, location } = req.body;
+  const competitor = new Competitor({
+    name,
+    category,
+    location
+  });
   await competitor.save();
   res.json(competitor);
 });
+
 
 router.delete('/competitors/:id', async (req, res) => {
   await Competitor.findByIdAndDelete(req.params.id);
