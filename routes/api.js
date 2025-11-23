@@ -32,12 +32,11 @@ router.post('/competitors', async (req, res) => {
   const competitor = new Competitor({
     name,
     category,
-    location
+    location,
   });
   await competitor.save();
   res.json(competitor);
 });
-
 
 router.delete('/competitors/:id', async (req, res) => {
   await Competitor.findByIdAndDelete(req.params.id);
@@ -48,7 +47,6 @@ router.get('/competitors/:id', async (req, res) => {
   const comp = await Competitor.findById(req.params.id);
   res.json(comp);
 });
-
 
 // ---------------- JUDGES ----------------
 router.get('/judges', async (req, res) => {
@@ -66,6 +64,7 @@ router.delete('/judges/:id', async (req, res) => {
   await Judge.findByIdAndDelete(req.params.id);
   res.json({ success: true });
 });
+
 // Judge login
 router.post('/judges/login', async (req, res) => {
   const { username, password } = req.body;
@@ -82,35 +81,80 @@ router.post('/judges/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid password' });
     }
 
-    res.json({ _id: judge._id, username: judge.username ,});
+    res.json({ _id: judge._id, username: judge.username });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Server error during login' });
   }
 });
 
-
 // ---------------- CATEGORIES ----------------
+
+// Admin: get ALL categories (no visibility filtering)
 router.get('/categories', async (req, res) => {
-  const list = await Category.find();
-  res.json(list);
+  try {
+    const list = await Category.find();
+    res.json(list);
+  } catch (err) {
+    console.error('Error fetching categories:', err);
+    res.status(500).json({ message: 'Server error fetching categories' });
+  }
+});
+
+// Judge-specific: only categories visible for this judge
+router.get('/categories/judge/:judgeId', async (req, res) => {
+  try {
+    const { judgeId } = req.params;
+
+    const categories = await Category.find({
+      $or: [
+        // visibleToJudges not defined
+        { visibleToJudges: { $exists: false } },
+        // or explicitly empty array
+        { visibleToJudges: { $size: 0 } },
+        // or this judge is in the visibleToJudges list
+        { visibleToJudges: judgeId },
+      ],
+    }).sort({ name: 1 });
+
+    res.json(categories);
+  } catch (err) {
+    console.error('Error fetching judge-specific categories:', err);
+    res.status(500).json({ message: 'Server error fetching judge categories' });
+  }
 });
 
 router.post('/categories', async (req, res) => {
-  const category = new Category(req.body); // includes name, type, required
-  await category.save();
-  res.json(category);
+  try {
+    const category = new Category(req.body); // includes name, type, mandatory, visibleToJudges
+    await category.save();
+    res.json(category);
+  } catch (err) {
+    console.error('Error creating category:', err);
+    res.status(500).json({ message: 'Server error creating category' });
+  }
 });
 
 router.put('/categories/:id', async (req, res) => {
-  const updated = await Category.findByIdAndUpdate(req.params.id, req.body, { new: true });
-  res.json(updated);
+  try {
+    const updated = await Category.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+    });
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating category:', err);
+    res.status(500).json({ message: 'Server error updating category' });
+  }
 });
 
-
 router.delete('/categories/:id', async (req, res) => {
-  await Category.findByIdAndDelete(req.params.id);
-  res.json({ success: true });
+  try {
+    await Category.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting category:', err);
+    res.status(500).json({ message: 'Server error deleting category' });
+  }
 });
 
 // ---------------- ASSIGNMENTS ----------------
@@ -136,6 +180,7 @@ router.post('/assignments', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 // Get all assignments
 router.get('/assignments', async (req, res) => {
   try {
@@ -170,7 +215,7 @@ router.post('/assignments/save', async (req, res) => {
   }
 });
 
-// Get assignments for a specific judge
+// Get assignments for a specific judge (older route)
 router.get('/assignments/:judgeId', async (req, res) => {
   try {
     const assignment = await Assignment.findOne({ judgeId: req.params.judgeId });
@@ -180,13 +225,13 @@ router.get('/assignments/:judgeId', async (req, res) => {
 
     const competitors = await Competitor.find({ _id: { $in: assignment.competitorIds } });
     res.json({ assignment, competitors });
-
   } catch (err) {
     console.error('Error fetching judge assignments:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
-// Get assignments by judge ID using new descriptive route
+
+// Get assignments by judge ID using descriptive route
 router.get('/assignments/judge/:judgeId', async (req, res) => {
   const { judgeId } = req.params;
   console.log(`Fetching assignments for judge ID: ${judgeId}`);
@@ -200,6 +245,7 @@ router.get('/assignments/judge/:judgeId', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
 // ---------------- REVIEWS ----------------
 const Review = require('../models/Review');
 
@@ -231,8 +277,6 @@ router.post('/reviews', async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
-
-
 
 // GET reviews for a specific judge and competitor
 router.get('/reviews/:judgeId/:competitorId', async (req, res) => {
@@ -266,6 +310,5 @@ router.delete('/reviews', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete reviews' });
   }
 });
-
 
 module.exports = router;
