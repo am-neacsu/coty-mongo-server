@@ -60,6 +60,24 @@ router.post('/judges', async (req, res) => {
   res.json(judge);
 });
 
+router.put('/judges/:id', async (req, res) => {
+  try {
+    const { username, password, location, table, isAdmin } = req.body;
+    // Build update object dynamically to avoid wiping fields if not sent
+    const update = {};
+    if (username) update.username = username;
+    if (password) update.password = password;
+    if (location !== undefined) update.location = location;
+    if (table !== undefined) update.table = table;
+    if (isAdmin !== undefined) update.isAdmin = isAdmin;
+
+    const judge = await Judge.findByIdAndUpdate(req.params.id, update, { new: true });
+    res.json(judge);
+  } catch (err) {
+    res.status(500).json({ error: 'Update failed' });
+  }
+});
+
 router.delete('/judges/:id', async (req, res) => {
   await Judge.findByIdAndDelete(req.params.id);
   res.json({ success: true });
@@ -164,17 +182,20 @@ router.post('/assignments', async (req, res) => {
   if (!judgeId) return res.status(400).json({ message: 'judgeId required' });
 
   try {
-    const existing = await Assignment.findOne({ judgeId });
+    // 1. Remove existing assignments for this judge
+    await Assignment.deleteMany({ judgeId });
 
-    if (existing) {
-      existing.competitorIds = competitorIds;
-      await existing.save();
-      return res.json(existing);
-    } else {
-      const assignment = new Assignment({ judgeId, competitorIds });
-      await assignment.save();
-      return res.json(assignment);
+    // 2. Insert new assignments
+    if (competitorIds && competitorIds.length > 0) {
+      const assignments = competitorIds.map(cId => ({
+        judgeId,
+        competitorId: cId
+      }));
+      await Assignment.insertMany(assignments);
+      return res.json({ message: 'Assignments updated', count: assignments.length });
     }
+
+    return res.json({ message: 'Assignments cleared' });
   } catch (err) {
     console.error('Assignment save error:', err);
     res.status(500).json({ message: 'Server error' });
@@ -206,7 +227,9 @@ router.post('/assignments/save', async (req, res) => {
     await Assignment.deleteMany({});
 
     // Insert new ones
-    await Assignment.insertMany(payload);
+    if (payload.length > 0) {
+      await Assignment.insertMany(payload);
+    }
 
     res.status(200).json({ message: 'All assignments saved' });
   } catch (err) {
@@ -215,16 +238,32 @@ router.post('/assignments/save', async (req, res) => {
   }
 });
 
-// Get assignments for a specific judge (older route)
+// Get assignments for a specific judge - corrected
 router.get('/assignments/:judgeId', async (req, res) => {
   try {
-    const assignment = await Assignment.findOne({ judgeId: req.params.judgeId });
-    if (!assignment) {
-      return res.status(404).json({ message: 'No assignments found for this judge' });
+    const { judgeId } = req.params;
+    // Find all assignment docs for this judge
+    const assignments = await Assignment.find({ judgeId });
+
+    if (!assignments || assignments.length === 0) {
+      // Return empty structure rather than 404 to be friendlier to frontend
+      return res.json({ assignment: null, competitors: [] });
     }
 
-    const competitors = await Competitor.find({ _id: { $in: assignment.competitorIds } });
-    res.json({ assignment, competitors });
+    // Extract competitor IDs
+    const competitorIds = assignments.map(a => a.competitorId);
+
+    // Fetch competitor details
+    const competitors = await Competitor.find({ _id: { $in: competitorIds } });
+
+    // Maintain backward compatibility structure if needed, or just return competitors
+    // The frontend likely expects { assignment, competitors } based on old code
+    // We'll mock the 'assignment' object to have the array if frontend needs it
+    res.json({
+      assignment: { judgeId, competitorIds },
+      competitors
+    });
+
   } catch (err) {
     console.error('Error fetching judge assignments:', err);
     res.status(500).json({ message: 'Server error' });
