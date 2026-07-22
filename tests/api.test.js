@@ -6,11 +6,13 @@ const Judge = require('../models/Judge');
 const Competitor = require('../models/Competitor');
 const Assignment = require('../models/Assignment');
 const Review = require('../models/Review');
+const Category = require('../models/Category');
 
 jest.mock('../models/Judge');
 jest.mock('../models/Competitor');
 jest.mock('../models/Assignment');
 jest.mock('../models/Review');
+jest.mock('../models/Category');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'local-dev-secret-change-me';
 
@@ -119,6 +121,17 @@ describe('Express API', () => {
     expect(res.body).toEqual({ message: 'Authentication required' });
   });
 
+  test('protected admin route rejects malformed bearer token', async () => {
+    const res = await request(app)
+      .post('/api/judges')
+      .set('Authorization', 'Bearer not-a-valid-jwt')
+      .send({ username: 'newjudge', password: 'secret' });
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ message: 'Invalid or expired session' });
+    expect(Judge).not.toHaveBeenCalled();
+  });
+
   test('non-admin token is rejected from admin route', async () => {
     const res = await request(app)
       .post('/api/competitors')
@@ -178,6 +191,83 @@ describe('Express API', () => {
     expect(res.body[1].password).toBeUndefined();
   });
 
+  test('GET /api/categories/judge/:judgeId returns categories visible to that judge', async () => {
+    const judgeId = new mongoose.Types.ObjectId().toString();
+    const visibleCategories = [
+      { _id: new mongoose.Types.ObjectId(), name: 'All Judges', visibleToJudges: [] },
+      { _id: new mongoose.Types.ObjectId(), name: 'Specific Judge', visibleToJudges: [judgeId] },
+    ];
+    const query = mockQuery(visibleCategories);
+    Category.find.mockReturnValue(query);
+
+    const res = await request(app).get(`/api/categories/judge/${judgeId}`);
+
+    expect(res.status).toBe(200);
+    expect(Category.find).toHaveBeenCalledWith({
+      $or: [
+        { visibleToJudges: { $exists: false } },
+        { visibleToJudges: { $size: 0 } },
+        { visibleToJudges: judgeId },
+      ],
+    });
+    expect(query.sort).toHaveBeenCalledWith({ name: 1 });
+    expect(res.body).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'All Judges' }),
+      expect.objectContaining({ name: 'Specific Judge' }),
+    ]));
+  });
+
+  test('POST /api/assignments/save replaces all assignments with provided payload', async () => {
+    const payload = [
+      {
+        judgeId: new mongoose.Types.ObjectId().toString(),
+        competitorId: new mongoose.Types.ObjectId().toString(),
+      },
+      {
+        judgeId: new mongoose.Types.ObjectId().toString(),
+        competitorId: new mongoose.Types.ObjectId().toString(),
+      },
+    ];
+    Assignment.deleteMany.mockResolvedValue({ deletedCount: 4 });
+    Assignment.insertMany.mockResolvedValue(payload);
+
+    const res = await request(app)
+      .post('/api/assignments/save')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`)
+      .send(payload);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ message: 'All assignments saved' });
+    expect(Assignment.deleteMany).toHaveBeenCalledWith({});
+    expect(Assignment.insertMany).toHaveBeenCalledWith(payload, { ordered: false });
+  });
+
+  test('POST /api/assignments/save clears assignments when payload is an empty array', async () => {
+    Assignment.deleteMany.mockResolvedValue({ deletedCount: 2 });
+
+    const res = await request(app)
+      .post('/api/assignments/save')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`)
+      .send([]);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ message: 'All assignments saved' });
+    expect(Assignment.deleteMany).toHaveBeenCalledWith({});
+    expect(Assignment.insertMany).not.toHaveBeenCalled();
+  });
+
+  test('POST /api/assignments/save rejects non-array payload', async () => {
+    const res = await request(app)
+      .post('/api/assignments/save')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`)
+      .send({ judgeId: new mongoose.Types.ObjectId().toString(), competitorIds: [] });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: 'Invalid payload format' });
+    expect(Assignment.deleteMany).not.toHaveBeenCalled();
+    expect(Assignment.insertMany).not.toHaveBeenCalled();
+  });
+
   test('POST /api/reviews upserts review with expected query, update, and options', async () => {
     const reviewPayload = {
       judgeId: new mongoose.Types.ObjectId().toString(),
@@ -207,6 +297,22 @@ describe('Express API', () => {
     expect(res.body).toEqual({ message: 'Review saved', review: expect.objectContaining(reviewPayload) });
   });
 
+  test('POST /api/reviews rejects invalid payload with 400 before touching persistence', async () => {
+    const res = await request(app)
+      .post('/api/reviews')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({
+        judgeId: new mongoose.Types.ObjectId().toString(),
+        competitorId: new mongoose.Types.ObjectId().toString(),
+        type: 'rating',
+        value: '5',
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Missing required fields' });
+    expect(Review.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
   test('DELETE /api/competitors/:id cascades assignment and review deletes', async () => {
     const competitorId = new mongoose.Types.ObjectId().toString();
     Assignment.deleteMany.mockResolvedValue({ deletedCount: 2 });
@@ -222,5 +328,39 @@ describe('Express API', () => {
     expect(Assignment.deleteMany).toHaveBeenCalledWith({ competitorId });
     expect(Review.deleteMany).toHaveBeenCalledWith({ competitorId });
     expect(Competitor.findByIdAndDelete).toHaveBeenCalledWith(competitorId);
+  });
+
+  test('DELETE /api/judges/:id cascades assignments, reviews, and category visibility cleanup', async () => {
+    const judgeId = new mongoose.Types.ObjectId().toString();
+    Assignment.deleteMany.mockResolvedValue({ deletedCount: 1 });
+    Review.deleteMany.mockResolvedValue({ deletedCount: 2 });
+    Category.updateMany.mockResolvedValue({ modifiedCount: 3 });
+    Judge.findByIdAndDelete.mockResolvedValue({ _id: judgeId });
+
+    const res = await request(app)
+      .delete(`/api/judges/${judgeId}`)
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true });
+    expect(Assignment.deleteMany).toHaveBeenCalledWith({ judgeId });
+    expect(Review.deleteMany).toHaveBeenCalledWith({ judgeId });
+    expect(Category.updateMany).toHaveBeenCalledWith({}, { $pull: { visibleToJudges: judgeId } });
+    expect(Judge.findByIdAndDelete).toHaveBeenCalledWith(judgeId);
+  });
+
+  test('DELETE /api/categories/:id cascades review deletes', async () => {
+    const categoryId = new mongoose.Types.ObjectId().toString();
+    Review.deleteMany.mockResolvedValue({ deletedCount: 5 });
+    Category.findByIdAndDelete.mockResolvedValue({ _id: categoryId });
+
+    const res = await request(app)
+      .delete(`/api/categories/${categoryId}`)
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true });
+    expect(Review.deleteMany).toHaveBeenCalledWith({ categoryId });
+    expect(Category.findByIdAndDelete).toHaveBeenCalledWith(categoryId);
   });
 });
