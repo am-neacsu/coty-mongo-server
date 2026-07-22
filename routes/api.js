@@ -7,6 +7,8 @@ const judgeRoutes = require('./judgeRoutes');
 const categoryRoutes = require('./categoryRoutes');
 const assignmentRoutes = require('./assignmentRoutes');
 const reviewRoutes = require('./reviewRoutes');
+const registrationRoutes = require('./registrationRoutes');
+const adminRegistrationRoutes = require('./adminRegistrationRoutes');
 
 const router = express.Router();
 
@@ -29,5 +31,7 @@ router.use(judgeRoutes);
 router.use(categoryRoutes);
 router.use(assignmentRoutes);
 router.use(reviewRoutes);
+router.use(registrationRoutes);
+router.use(adminRegistrationRoutes);
 
 module.exports = router;
