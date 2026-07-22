@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest --runInBand",
     "start": "node server.js",
     "dev": "node server.js",
     "smoke": "node scripts/smokeTest.js",
@@ -20,5 +20,9 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.16.1"
   },
-  "description": ""
+  "description": "",
+  "devDependencies": {
+    "jest": "^30.4.2",
+    "supertest": "^7.2.2"
+  }
 }
