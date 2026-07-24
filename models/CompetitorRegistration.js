@@ -39,6 +39,17 @@ const competitorRegistrationSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  regionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Region',
+    default: null,
+    index: true
+  },
+  regionNameSnapshot: {
+    type: String,
+    default: '',
+    trim: true
+  },
   competitionCategory: {
     type: String,
     enum: ['Under 2 years', 'Over 2 years'],
@@ -74,5 +85,6 @@ const competitorRegistrationSchema = new mongoose.Schema({
 
 competitorRegistrationSchema.index({ status: 1, createdAt: -1 });
 competitorRegistrationSchema.index({ clubId: 1, status: 1 });
+competitorRegistrationSchema.index({ regionId: 1, status: 1 });
 
 module.exports = mongoose.model('CompetitorRegistration', competitorRegistrationSchema);

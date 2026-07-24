@@ -1,5 +1,6 @@
 const express = require('express');
 
+const Region = require('../models/Region');
 const Club = require('../models/Club');
 const RegistrationTimingCategory = require('../models/RegistrationTimingCategory');
 const CompetitorRegistration = require('../models/CompetitorRegistration');
@@ -9,10 +10,100 @@ const { requireAuth, requireAdmin } = require('../middleware/auth');
 const router = express.Router();
 const adminOnly = [requireAuth, requireAdmin];
 
+async function resolveRegion(regionId) {
+  if (!regionId) return { regionId: null, regionNameSnapshot: '' };
+  const region = await Region.findById(regionId);
+  if (!region) {
+    const error = new Error('Region not found');
+    error.status = 404;
+    throw error;
+  }
+  return { regionId: region._id, regionNameSnapshot: region.name };
+}
+
+// ---------------- REGIONS ----------------
+router.get('/admin/regions', adminOnly, async (req, res) => {
+  try {
+    const regions = await Region.find().sort({ order: 1, name: 1 });
+    res.json(regions);
+  } catch (err) {
+    console.error('Error fetching regions:', err);
+    res.status(500).json({ message: 'Server error fetching regions' });
+  }
+});
+
+router.post('/admin/regions', adminOnly, async (req, res) => {
+  try {
+    const { name, active, order } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Region name is required' });
+    }
+
+    const region = new Region({
+      name: name.trim(),
+      active: active !== false,
+      order: Number(order) || 0
+    });
+    await region.save();
+    res.status(201).json(region);
+  } catch (err) {
+    console.error('Error creating region:', err);
+    if (err.code === 11000) {
+      return res.status(409).json({ message: 'Region already exists' });
+    }
+    res.status(500).json({ message: 'Server error creating region' });
+  }
+});
+
+router.put('/admin/regions/:id', adminOnly, async (req, res) => {
+  try {
+    const { name, active, order } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Region name is required' });
+    }
+
+    const updated = await Region.findByIdAndUpdate(
+      req.params.id,
+      { name: name.trim(), active: active !== false, order: Number(order) || 0 },
+      { new: true, runValidators: true }
+    );
+
+    if (!updated) return res.status(404).json({ message: 'Region not found' });
+
+    await Club.updateMany(
+      { regionId: updated._id },
+      { regionNameSnapshot: updated.name }
+    );
+
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating region:', err);
+    if (err.code === 11000) {
+      return res.status(409).json({ message: 'Region already exists' });
+    }
+    res.status(500).json({ message: 'Server error updating region' });
+  }
+});
+
+router.delete('/admin/regions/:id', adminOnly, async (req, res) => {
+  try {
+    const clubCount = await Club.countDocuments({ regionId: req.params.id });
+    if (clubCount > 0) {
+      return res.status(409).json({ message: 'Cannot delete region while clubs are assigned to it. Disable it or move clubs first.' });
+    }
+
+    await Region.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting region:', err);
+    res.status(500).json({ message: 'Server error deleting region' });
+  }
+});
+
 // ---------------- CLUBS ----------------
 router.get('/admin/clubs', adminOnly, async (req, res) => {
   try {
-    const clubs = await Club.find().sort({ name: 1 });
+    const clubs = await Club.find().sort({ regionNameSnapshot: 1, name: 1 });
     res.json(clubs);
   } catch (err) {
     console.error('Error fetching clubs:', err);
@@ -22,16 +113,18 @@ router.get('/admin/clubs', adminOnly, async (req, res) => {
 
 router.post('/admin/clubs', adminOnly, async (req, res) => {
   try {
-    const { name, active } = req.body;
+    const { name, active, regionId } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Club name is required' });
     }
 
-    const club = new Club({ name: name.trim(), active: active !== false });
+    const regionData = await resolveRegion(regionId);
+    const club = new Club({ name: name.trim(), active: active !== false, ...regionData });
     await club.save();
     res.status(201).json(club);
   } catch (err) {
     console.error('Error creating club:', err);
+    if (err.status) return res.status(err.status).json({ message: err.message });
     if (err.code === 11000) {
       return res.status(409).json({ message: 'Club already exists' });
     }
@@ -41,14 +134,15 @@ router.post('/admin/clubs', adminOnly, async (req, res) => {
 
 router.put('/admin/clubs/:id', adminOnly, async (req, res) => {
   try {
-    const { name, active } = req.body;
+    const { name, active, regionId } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Club name is required' });
     }
 
+    const regionData = await resolveRegion(regionId);
     const updated = await Club.findByIdAndUpdate(
       req.params.id,
-      { name: name.trim(), active: active !== false },
+      { name: name.trim(), active: active !== false, ...regionData },
       { new: true, runValidators: true }
     );
 
@@ -56,6 +150,7 @@ router.put('/admin/clubs/:id', adminOnly, async (req, res) => {
     res.json(updated);
   } catch (err) {
     console.error('Error updating club:', err);
+    if (err.status) return res.status(err.status).json({ message: err.message });
     if (err.code === 11000) {
       return res.status(409).json({ message: 'Club already exists' });
     }
@@ -149,8 +244,22 @@ router.delete('/admin/registration-timing-categories/:id', adminOnly, async (req
 // ---------------- REGISTRATIONS ----------------
 router.get('/admin/registrations', adminOnly, async (req, res) => {
   try {
-    const status = req.query.status;
+    const { status, regionId } = req.query;
     const query = status && status !== 'all' ? { status } : {};
+
+    if (regionId && regionId !== 'all') {
+      if (regionId === 'ungrouped') {
+        query.$or = [
+          { regionId: null },
+          { regionId: { $exists: false } },
+          { regionNameSnapshot: '' },
+          { regionNameSnapshot: { $exists: false } }
+        ];
+      } else {
+        query.regionId = regionId;
+      }
+    }
+
     const registrations = await CompetitorRegistration.find(query).sort({ createdAt: -1 });
     res.json(registrations);
   } catch (err) {

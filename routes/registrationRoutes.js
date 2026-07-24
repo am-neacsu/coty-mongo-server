@@ -71,6 +71,8 @@ router.post('/registration', async (req, res) => {
       surname: surname ? surname.trim() : '',
       clubId: club._id,
       clubNameSnapshot: club.name,
+      regionId: club.regionId || null,
+      regionNameSnapshot: club.regionNameSnapshot || '',
       competitionCategory,
       timings: cleanTimings
     });
