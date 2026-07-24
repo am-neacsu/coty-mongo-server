@@ -49,19 +49,22 @@ router.post('/registration', async (req, res) => {
 
     const timingCategories = await RegistrationTimingCategory.find({ active: true });
     const timingCategoryMap = new Map(timingCategories.map(cat => [String(cat._id), cat]));
+    const submittedTimingMap = new Map(
+      Array.isArray(timings)
+        ? timings.map(t => [String(t?.categoryId || ''), String(t?.value || '').trim()])
+        : []
+    );
 
-    const cleanTimings = Array.isArray(timings)
-      ? timings
-          .filter(t => t && t.categoryId && timingCategoryMap.has(String(t.categoryId)))
-          .map(t => {
-            const cat = timingCategoryMap.get(String(t.categoryId));
-            return {
-              categoryId: cat._id,
-              categoryNameSnapshot: cat.name,
-              value: String(t.value || '').trim()
-            };
-          })
-      : [];
+    const missingTiming = timingCategories.find(cat => !submittedTimingMap.get(String(cat._id)));
+    if (missingTiming) {
+      return res.status(400).json({ message: `Timing information is required for ${missingTiming.name}` });
+    }
+
+    const cleanTimings = timingCategories.map(cat => ({
+      categoryId: cat._id,
+      categoryNameSnapshot: cat.name,
+      value: submittedTimingMap.get(String(cat._id))
+    }));
 
     const registration = new CompetitorRegistration({
       name: name.trim(),
