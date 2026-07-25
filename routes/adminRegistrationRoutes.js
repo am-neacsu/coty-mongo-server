@@ -1,6 +1,9 @@
 const express = require('express');
+const bcrypt = require('bcrypt');
 
 const Region = require('../models/Region');
+const RegistrationHeat = require('../models/RegistrationHeat');
+const RegistrationSettings = require('../models/RegistrationSettings');
 const Club = require('../models/Club');
 const RegistrationTimingCategory = require('../models/RegistrationTimingCategory');
 const CompetitorRegistration = require('../models/CompetitorRegistration');
@@ -20,6 +23,143 @@ async function resolveRegion(regionId) {
   }
   return { regionId: region._id, regionNameSnapshot: region.name };
 }
+
+async function getRegistrationSettings() {
+  let settings = await RegistrationSettings.findOne();
+  if (!settings) {
+    settings = await RegistrationSettings.create({ registrationOpen: true });
+  }
+  return settings;
+}
+
+
+// ---------------- REGISTRATION ACCESS SETTINGS ----------------
+router.get('/admin/registration-settings', adminOnly, async (req, res) => {
+  try {
+    const settings = await getRegistrationSettings();
+    res.json({
+      registrationOpen: settings.registrationOpen,
+      hasManagerPassword: !!settings.managerPasswordHash
+    });
+  } catch (err) {
+    console.error('Error fetching registration settings:', err);
+    res.status(500).json({ message: 'Server error fetching registration settings' });
+  }
+});
+
+router.put('/admin/registration-settings', adminOnly, async (req, res) => {
+  try {
+    const settings = await getRegistrationSettings();
+    if (typeof req.body.registrationOpen === 'boolean') {
+      settings.registrationOpen = req.body.registrationOpen;
+    }
+    await settings.save();
+    res.json({
+      registrationOpen: settings.registrationOpen,
+      hasManagerPassword: !!settings.managerPasswordHash
+    });
+  } catch (err) {
+    console.error('Error updating registration settings:', err);
+    res.status(500).json({ message: 'Server error updating registration settings' });
+  }
+});
+
+router.put('/admin/registration-settings/password', adminOnly, async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password || String(password).trim().length < 4) {
+      return res.status(400).json({ message: 'Manager password must be at least 4 characters' });
+    }
+
+    const settings = await getRegistrationSettings();
+    settings.managerPasswordHash = await bcrypt.hash(String(password), 10);
+    await settings.save();
+    res.json({ success: true, hasManagerPassword: true });
+  } catch (err) {
+    console.error('Error updating manager registration password:', err);
+    res.status(500).json({ message: 'Server error updating manager registration password' });
+  }
+});
+
+// ---------------- REGISTRATION HEATS ----------------
+router.get('/admin/registration-heats', adminOnly, async (req, res) => {
+  try {
+    const heats = await RegistrationHeat.find().sort({ order: 1, date: 1, name: 1 });
+    res.json(heats);
+  } catch (err) {
+    console.error('Error fetching registration heats:', err);
+    res.status(500).json({ message: 'Server error fetching registration heats' });
+  }
+});
+
+router.post('/admin/registration-heats', adminOnly, async (req, res) => {
+  try {
+    const { name, location, date, active, order } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Heat name is required' });
+    }
+
+    const heat = new RegistrationHeat({
+      name: name.trim(),
+      location: location ? String(location).trim() : '',
+      date: date ? new Date(date) : null,
+      active: active !== false,
+      order: Number(order) || 0
+    });
+    await heat.save();
+    res.status(201).json(heat);
+  } catch (err) {
+    console.error('Error creating registration heat:', err);
+    if (err.code === 11000) {
+      return res.status(409).json({ message: 'Heat already exists' });
+    }
+    res.status(500).json({ message: 'Server error creating registration heat' });
+  }
+});
+
+router.put('/admin/registration-heats/:id', adminOnly, async (req, res) => {
+  try {
+    const { name, location, date, active, order } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Heat name is required' });
+    }
+
+    const updated = await RegistrationHeat.findByIdAndUpdate(
+      req.params.id,
+      {
+        name: name.trim(),
+        location: location ? String(location).trim() : '',
+        date: date ? new Date(date) : null,
+        active: active !== false,
+        order: Number(order) || 0
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updated) return res.status(404).json({ message: 'Heat not found' });
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating registration heat:', err);
+    if (err.code === 11000) {
+      return res.status(409).json({ message: 'Heat already exists' });
+    }
+    res.status(500).json({ message: 'Server error updating registration heat' });
+  }
+});
+
+router.delete('/admin/registration-heats/:id', adminOnly, async (req, res) => {
+  try {
+    const pendingCount = await CompetitorRegistration.countDocuments({ heatId: req.params.id, status: 'pending' });
+    if (pendingCount > 0) {
+      return res.status(409).json({ message: 'Cannot delete heat with pending registrations. Deactivate it instead.' });
+    }
+    await RegistrationHeat.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting registration heat:', err);
+    res.status(500).json({ message: 'Server error deleting registration heat' });
+  }
+});
 
 // ---------------- REGIONS ----------------
 router.get('/admin/regions', adminOnly, async (req, res) => {
@@ -244,7 +384,7 @@ router.delete('/admin/registration-timing-categories/:id', adminOnly, async (req
 // ---------------- REGISTRATIONS ----------------
 router.get('/admin/registrations', adminOnly, async (req, res) => {
   try {
-    const { status, regionId } = req.query;
+    const { status, regionId, heatId } = req.query;
     const query = status && status !== 'all' ? { status } : {};
 
     if (regionId && regionId !== 'all') {
@@ -257,6 +397,22 @@ router.get('/admin/registrations', adminOnly, async (req, res) => {
         ];
       } else {
         query.regionId = regionId;
+      }
+    }
+
+
+
+    if (heatId && heatId !== 'all') {
+      if (heatId === 'unassigned') {
+        query.$or = [
+          ...(query.$or || []),
+          { heatId: null },
+          { heatId: { $exists: false } },
+          { heatNameSnapshot: '' },
+          { heatNameSnapshot: { $exists: false } }
+        ];
+      } else {
+        query.heatId = heatId;
       }
     }
 
