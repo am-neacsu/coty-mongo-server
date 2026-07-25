@@ -1,20 +1,19 @@
 const mongoose = require('mongoose');
 
 const CategorySchema = new mongoose.Schema({
-  name: { type: String, required: true },
+  name: { type: String, required: true, trim: true },
 
-  type: { 
-    type: String, 
-    enum: ['rating', 'time', 'text'], 
-    default: 'rating' 
+  type: {
+    type: String,
+    enum: ['rating', 'time', 'text'],
+    default: 'rating'
   },
 
-  mandatory: { 
-    type: Boolean, 
-    default: false 
+  mandatory: {
+    type: Boolean,
+    default: false
   }, // Only used when type === 'text'
 
-  // NEW FIELD:
   // Leave empty = category visible to all judges
   // Add judge IDs = visible only for those judges
   visibleToJudges: [
@@ -24,6 +23,6 @@ const CategorySchema = new mongoose.Schema({
       default: [],
     }
   ]
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model('Category', CategorySchema);
