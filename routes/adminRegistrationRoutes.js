@@ -149,10 +149,6 @@ router.put('/admin/registration-heats/:id', adminOnly, async (req, res) => {
 
 router.delete('/admin/registration-heats/:id', adminOnly, async (req, res) => {
   try {
-    const pendingCount = await CompetitorRegistration.countDocuments({ heatId: req.params.id, status: 'pending' });
-    if (pendingCount > 0) {
-      return res.status(409).json({ message: 'Cannot delete heat with pending registrations. Deactivate it instead.' });
-    }
     await RegistrationHeat.findByIdAndDelete(req.params.id);
     res.json({ success: true });
   } catch (err) {
@@ -384,7 +380,7 @@ router.delete('/admin/registration-timing-categories/:id', adminOnly, async (req
 // ---------------- REGISTRATIONS ----------------
 router.get('/admin/registrations', adminOnly, async (req, res) => {
   try {
-    const { status, regionId, heatId } = req.query;
+    const { status, regionId } = req.query;
     const query = status && status !== 'all' ? { status } : {};
 
     if (regionId && regionId !== 'all') {
@@ -401,20 +397,6 @@ router.get('/admin/registrations', adminOnly, async (req, res) => {
     }
 
 
-
-    if (heatId && heatId !== 'all') {
-      if (heatId === 'unassigned') {
-        query.$or = [
-          ...(query.$or || []),
-          { heatId: null },
-          { heatId: { $exists: false } },
-          { heatNameSnapshot: '' },
-          { heatNameSnapshot: { $exists: false } }
-        ];
-      } else {
-        query.heatId = heatId;
-      }
-    }
 
     const registrations = await CompetitorRegistration.find(query).sort({ createdAt: -1 });
     res.json(registrations);

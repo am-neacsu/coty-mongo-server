@@ -50,26 +50,6 @@ const competitorRegistrationSchema = new mongoose.Schema({
     default: '',
     trim: true
   },
-  heatId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'RegistrationHeat',
-    default: null,
-    index: true
-  },
-  heatNameSnapshot: {
-    type: String,
-    default: '',
-    trim: true
-  },
-  heatLocationSnapshot: {
-    type: String,
-    default: '',
-    trim: true
-  },
-  heatDateSnapshot: {
-    type: Date,
-    default: null
-  },
   competitionCategory: {
     type: String,
     enum: ['Under 2 years', 'Over 2 years'],
@@ -106,6 +86,5 @@ const competitorRegistrationSchema = new mongoose.Schema({
 competitorRegistrationSchema.index({ status: 1, createdAt: -1 });
 competitorRegistrationSchema.index({ clubId: 1, status: 1 });
 competitorRegistrationSchema.index({ regionId: 1, status: 1 });
-competitorRegistrationSchema.index({ heatId: 1, status: 1 });
 
 module.exports = mongoose.model('CompetitorRegistration', competitorRegistrationSchema);

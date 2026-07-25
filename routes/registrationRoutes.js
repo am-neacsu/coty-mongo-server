@@ -25,13 +25,9 @@ async function getRegistrationSettings() {
   return settings;
 }
 
-function signRegistrationAccessToken(heat) {
+function signRegistrationAccessToken() {
   return jwt.sign(
-    {
-      type: 'manager-registration',
-      heatId: heat._id.toString(),
-      heatName: heat.name
-    },
+    { type: 'manager-registration' },
     getRegistrationSecret(),
     { expiresIn: REGISTRATION_ACCESS_TTL }
   );
@@ -45,24 +41,15 @@ async function requireRegistrationAccess(req, res, next) {
 
   try {
     const payload = jwt.verify(String(token), getRegistrationSecret());
-    if (payload.type !== 'manager-registration' || !payload.heatId) {
+    if (payload.type !== 'manager-registration') {
       return res.status(401).json({ message: 'Invalid registration access' });
     }
 
-    const [settings, heat] = await Promise.all([
-      getRegistrationSettings(),
-      RegistrationHeat.findOne({ _id: payload.heatId, active: true })
-    ]);
+    const settings = await getRegistrationSettings();
 
     if (!settings.registrationOpen) {
       return res.status(403).json({ message: 'Registration is currently closed' });
     }
-
-    if (!heat) {
-      return res.status(401).json({ message: 'Selected heat is no longer available' });
-    }
-
-    req.registrationHeat = heat;
     next();
   } catch (err) {
     return res.status(401).json({ message: 'Invalid or expired registration access' });
@@ -89,20 +76,13 @@ router.get('/registration/access-config', async (req, res) => {
 
 router.post('/registration/access', async (req, res) => {
   try {
-    const { heatId, password } = req.body;
-
-    if (!heatId) {
-      return res.status(400).json({ message: 'Please select a heat' });
-    }
+    const { password } = req.body;
 
     if (!password) {
       return res.status(400).json({ message: 'Registration password is required' });
     }
 
-    const [settings, heat] = await Promise.all([
-      getRegistrationSettings(),
-      RegistrationHeat.findOne({ _id: heatId, active: true })
-    ]);
+    const settings = await getRegistrationSettings();
 
     if (!settings.registrationOpen) {
       return res.status(403).json({ message: 'Registration is currently closed' });
@@ -112,27 +92,13 @@ router.post('/registration/access', async (req, res) => {
       return res.status(403).json({ message: 'Manager registration password has not been configured yet' });
     }
 
-    if (!heat) {
-      return res.status(404).json({ message: 'Selected heat is not available' });
-    }
-
     const passwordOk = await bcrypt.compare(String(password), settings.managerPasswordHash);
     if (!passwordOk) {
       return res.status(401).json({ message: 'Invalid registration password' });
     }
 
-    const accessToken = signRegistrationAccessToken(heat);
-    res.json({
-      success: true,
-      accessToken,
-      heat: {
-        _id: heat._id,
-        name: heat.name,
-        location: heat.location,
-        date: heat.date,
-        order: heat.order
-      }
-    });
+    const accessToken = signRegistrationAccessToken();
+    res.json({ success: true, accessToken });
   } catch (err) {
     console.error('Error verifying registration access:', err);
     res.status(500).json({ message: 'Server error verifying registration access' });
@@ -149,13 +115,7 @@ router.get('/registration/public-config', requireRegistrationAccess, async (req,
     res.json({
       clubs,
       timingCategories,
-      competitionCategories: COMPETITION_CATEGORIES,
-      heat: {
-        _id: req.registrationHeat._id,
-        name: req.registrationHeat.name,
-        location: req.registrationHeat.location,
-        date: req.registrationHeat.date
-      }
+      competitionCategories: COMPETITION_CATEGORIES
     });
   } catch (err) {
     console.error('Error fetching registration config:', err);
@@ -166,7 +126,6 @@ router.get('/registration/public-config', requireRegistrationAccess, async (req,
 router.post('/registration', requireRegistrationAccess, async (req, res) => {
   try {
     const { name, surname, clubId, competitionCategory, timings } = req.body;
-    const heat = req.registrationHeat;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Name is required' });
@@ -210,10 +169,6 @@ router.post('/registration', requireRegistrationAccess, async (req, res) => {
       clubNameSnapshot: club.name,
       regionId: club.regionId || null,
       regionNameSnapshot: club.regionNameSnapshot || '',
-      heatId: heat._id,
-      heatNameSnapshot: heat.name,
-      heatLocationSnapshot: heat.location || '',
-      heatDateSnapshot: heat.date || null,
       competitionCategory,
       timings: cleanTimings
     });
