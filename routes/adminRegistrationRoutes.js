@@ -81,14 +81,14 @@ router.put('/admin/registration-settings/password', adminOnly, async (req, res) 
   }
 });
 
-// ---------------- REGISTRATION HEATS ----------------
+// ---------------- COMPETITION HEATS ----------------
 router.get('/admin/registration-heats', adminOnly, async (req, res) => {
   try {
     const heats = await RegistrationHeat.find().sort({ order: 1, date: 1, name: 1 });
     res.json(heats);
   } catch (err) {
-    console.error('Error fetching registration heats:', err);
-    res.status(500).json({ message: 'Server error fetching registration heats' });
+    console.error('Error fetching competition heats:', err);
+    res.status(500).json({ message: 'Server error fetching competition heats' });
   }
 });
 
@@ -109,11 +109,11 @@ router.post('/admin/registration-heats', adminOnly, async (req, res) => {
     await heat.save();
     res.status(201).json(heat);
   } catch (err) {
-    console.error('Error creating registration heat:', err);
+    console.error('Error creating competition heat:', err);
     if (err.code === 11000) {
       return res.status(409).json({ message: 'Heat already exists' });
     }
-    res.status(500).json({ message: 'Server error creating registration heat' });
+    res.status(500).json({ message: 'Server error creating competition heat' });
   }
 });
 
@@ -139,11 +139,11 @@ router.put('/admin/registration-heats/:id', adminOnly, async (req, res) => {
     if (!updated) return res.status(404).json({ message: 'Heat not found' });
     res.json(updated);
   } catch (err) {
-    console.error('Error updating registration heat:', err);
+    console.error('Error updating competition heat:', err);
     if (err.code === 11000) {
       return res.status(409).json({ message: 'Heat already exists' });
     }
-    res.status(500).json({ message: 'Server error updating registration heat' });
+    res.status(500).json({ message: 'Server error updating competition heat' });
   }
 });
 
@@ -152,8 +152,8 @@ router.delete('/admin/registration-heats/:id', adminOnly, async (req, res) => {
     await RegistrationHeat.findByIdAndDelete(req.params.id);
     res.json({ success: true });
   } catch (err) {
-    console.error('Error deleting registration heat:', err);
-    res.status(500).json({ message: 'Server error deleting registration heat' });
+    console.error('Error deleting competition heat:', err);
+    res.status(500).json({ message: 'Server error deleting competition heat' });
   }
 });
 
