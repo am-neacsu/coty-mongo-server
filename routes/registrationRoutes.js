@@ -66,6 +66,7 @@ router.get('/registration/access-config', async (req, res) => {
     res.json({
       registrationOpen: settings.registrationOpen,
       passwordRequired: !!settings.managerPasswordHash,
+      publicStyle: settings.publicStyle || 'luxury',
       heats
     });
   } catch (err) {
@@ -125,7 +126,7 @@ router.get('/registration/public-config', requireRegistrationAccess, async (req,
 
 router.post('/registration', requireRegistrationAccess, async (req, res) => {
   try {
-    const { name, surname, clubId, competitionCategory, timings } = req.body;
+    const { name, clubId, competitionCategory, timings } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Name is required' });
@@ -164,7 +165,7 @@ router.post('/registration', requireRegistrationAccess, async (req, res) => {
 
     const registration = new CompetitorRegistration({
       name: name.trim(),
-      surname: surname ? surname.trim() : '',
+      surname: '',
       clubId: club._id,
       clubNameSnapshot: club.name,
       regionId: club.regionId || null,

@@ -8,6 +8,11 @@ const registrationSettingsSchema = new mongoose.Schema({
   registrationOpen: {
     type: Boolean,
     default: true
+  },
+  publicStyle: {
+    type: String,
+    enum: ['luxury', 'classic-red'],
+    default: 'luxury'
   }
 }, { timestamps: true });
 

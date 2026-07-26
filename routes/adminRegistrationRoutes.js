@@ -39,6 +39,7 @@ router.get('/admin/registration-settings', adminOnly, async (req, res) => {
     const settings = await getRegistrationSettings();
     res.json({
       registrationOpen: settings.registrationOpen,
+      publicStyle: settings.publicStyle || 'luxury',
       hasManagerPassword: !!settings.managerPasswordHash
     });
   } catch (err) {
@@ -53,9 +54,13 @@ router.put('/admin/registration-settings', adminOnly, async (req, res) => {
     if (typeof req.body.registrationOpen === 'boolean') {
       settings.registrationOpen = req.body.registrationOpen;
     }
+    if (['luxury', 'classic-red'].includes(req.body.publicStyle)) {
+      settings.publicStyle = req.body.publicStyle;
+    }
     await settings.save();
     res.json({
       registrationOpen: settings.registrationOpen,
+      publicStyle: settings.publicStyle || 'luxury',
       hasManagerPassword: !!settings.managerPasswordHash
     });
   } catch (err) {
