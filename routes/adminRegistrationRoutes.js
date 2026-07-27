@@ -411,6 +411,17 @@ router.get('/admin/registrations', adminOnly, async (req, res) => {
   }
 });
 
+
+router.delete('/admin/registrations', adminOnly, async (req, res) => {
+  try {
+    const result = await CompetitorRegistration.deleteMany({});
+    res.json({ success: true, deletedCount: result.deletedCount || 0 });
+  } catch (err) {
+    console.error('Error deleting all registrations:', err);
+    res.status(500).json({ message: 'Server error deleting registrations' });
+  }
+});
+
 router.post('/admin/registrations/:id/accept', adminOnly, async (req, res) => {
   try {
     const registration = await CompetitorRegistration.findById(req.params.id);
