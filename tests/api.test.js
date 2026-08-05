@@ -7,12 +7,22 @@ const Competitor = require('../models/Competitor');
 const Assignment = require('../models/Assignment');
 const Review = require('../models/Review');
 const Category = require('../models/Category');
+const RegistrationSettings = require('../models/RegistrationSettings');
+const RegistrationHeat = require('../models/RegistrationHeat');
+const Club = require('../models/Club');
+const RegistrationTimingCategory = require('../models/RegistrationTimingCategory');
+const CompetitorRegistration = require('../models/CompetitorRegistration');
 
 jest.mock('../models/Judge');
 jest.mock('../models/Competitor');
 jest.mock('../models/Assignment');
 jest.mock('../models/Review');
 jest.mock('../models/Category');
+jest.mock('../models/RegistrationSettings');
+jest.mock('../models/RegistrationHeat');
+jest.mock('../models/Club');
+jest.mock('../models/RegistrationTimingCategory');
+jest.mock('../models/CompetitorRegistration');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'local-dev-secret-change-me';
 
@@ -32,6 +42,14 @@ function tokenFor(overrides = {}) {
       ...overrides,
     },
     JWT_SECRET,
+    { expiresIn: '12h' }
+  );
+}
+
+function managerRegistrationToken() {
+  return jwt.sign(
+    { type: 'manager-registration' },
+    process.env.REGISTRATION_ACCESS_SECRET || process.env.JWT_SECRET || 'local-registration-secret-change-me',
     { expiresIn: '12h' }
   );
 }
@@ -363,4 +381,201 @@ describe('Express API', () => {
     expect(Review.deleteMany).toHaveBeenCalledWith({ categoryId });
     expect(Category.findByIdAndDelete).toHaveBeenCalledWith(categoryId);
   });
+
+  test('GET /api/registration/access-config returns public style and active competition heats', async () => {
+    const settings = {
+      registrationOpen: true,
+      managerPasswordHash: 'hash',
+      publicStyle: 'classic-red',
+    };
+    const heats = [
+      { _id: new mongoose.Types.ObjectId(), name: 'South Heat', active: true },
+      { _id: new mongoose.Types.ObjectId(), name: 'Final', active: true },
+    ];
+    const heatQuery = { sort: jest.fn().mockResolvedValue(heats) };
+
+    RegistrationSettings.findOne.mockResolvedValue(settings);
+    RegistrationHeat.find.mockReturnValue(heatQuery);
+
+    const res = await request(app).get('/api/registration/access-config');
+
+    expect(res.status).toBe(200);
+    expect(RegistrationHeat.find).toHaveBeenCalledWith({ active: true });
+    expect(heatQuery.sort).toHaveBeenCalledWith({ order: 1, date: 1, name: 1 });
+    expect(res.body).toEqual(expect.objectContaining({
+      registrationOpen: true,
+      passwordRequired: true,
+      publicStyle: 'classic-red',
+      heats: expect.arrayContaining([expect.objectContaining({ name: 'South Heat' })]),
+    }));
+  });
+
+  test('PUT /api/admin/registration-settings allows admin to update public style', async () => {
+    const settings = {
+      registrationOpen: true,
+      publicStyle: 'luxury',
+      managerPasswordHash: 'hash',
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+    RegistrationSettings.findOne.mockResolvedValue(settings);
+
+    const res = await request(app)
+      .put('/api/admin/registration-settings')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true, username: 'admin' })}`)
+      .send({ publicStyle: 'classic-red', registrationOpen: false });
+
+    expect(res.status).toBe(200);
+    expect(settings.publicStyle).toBe('classic-red');
+    expect(settings.registrationOpen).toBe(false);
+    expect(settings.save).toHaveBeenCalledTimes(1);
+    expect(res.body).toEqual(expect.objectContaining({
+      registrationOpen: false,
+      publicStyle: 'classic-red',
+      hasManagerPassword: true,
+    }));
+  });
+
+  test('DELETE /api/admin/registrations rejects missing typed DELETE confirmation', async () => {
+    const res = await request(app)
+      .delete('/api/admin/registrations')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`)
+      .send({ confirm: 'WRONG' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: 'Type DELETE to confirm deleting all registrations' });
+    expect(CompetitorRegistration.deleteMany).not.toHaveBeenCalled();
+  });
+
+  test('DELETE /api/admin/registrations deletes registrations only with typed DELETE confirmation', async () => {
+    CompetitorRegistration.deleteMany.mockResolvedValue({ deletedCount: 3 });
+
+    const res = await request(app)
+      .delete('/api/admin/registrations')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`)
+      .send({ confirm: 'DELETE' });
+
+    expect(res.status).toBe(200);
+    expect(CompetitorRegistration.deleteMany).toHaveBeenCalledWith({});
+    expect(res.body).toEqual({ success: true, deletedCount: 3 });
+  });
+
+  test('POST /api/registration creates manager competitor registration without surname', async () => {
+    const clubId = new mongoose.Types.ObjectId();
+    const timingCategoryId = new mongoose.Types.ObjectId();
+    const settings = {
+      registrationOpen: true,
+      publicStyle: 'classic-red',
+      managerPasswordHash: 'hash',
+    };
+    const club = {
+      _id: clubId,
+      name: 'RWB',
+      regionId: null,
+      regionNameSnapshot: '',
+    };
+    const timingCategory = {
+      _id: timingCategoryId,
+      name: 'Chipping',
+      active: true,
+    };
+    const savedRegistration = {
+      _id: new mongoose.Types.ObjectId(),
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+
+    RegistrationSettings.findOne.mockResolvedValue(settings);
+    Club.findOne.mockResolvedValue(club);
+    RegistrationTimingCategory.find.mockResolvedValue([timingCategory]);
+    CompetitorRegistration.mockImplementation(function CompetitorRegistrationMock(data) {
+      Object.assign(savedRegistration, data);
+      return savedRegistration;
+    });
+
+    const res = await request(app)
+      .post('/api/registration')
+      .set('X-Registration-Access', managerRegistrationToken())
+      .send({
+        name: '  Full Name  ',
+        clubId: String(clubId),
+        competitionCategory: 'Over 2 years',
+        timings: [{ categoryId: String(timingCategoryId), value: '1:24:15' }],
+      });
+
+    expect(res.status).toBe(201);
+    expect(Club.findOne).toHaveBeenCalledWith({ _id: String(clubId), active: true });
+    expect(CompetitorRegistration).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Full Name',
+      surname: '',
+      clubId,
+      clubNameSnapshot: 'RWB',
+      competitionCategory: 'Over 2 years',
+      timings: [expect.objectContaining({ categoryNameSnapshot: 'Chipping', value: '1:24:15' })],
+    }));
+    expect(savedRegistration.save).toHaveBeenCalledTimes(1);
+    expect(res.body.success).toBe(true);
+  });
+
+  test('POST /api/admin/registrations/:id/accept creates competitor and marks registration accepted', async () => {
+    const registrationId = new mongoose.Types.ObjectId().toString();
+    const competitorId = new mongoose.Types.ObjectId();
+    const registration = {
+      _id: registrationId,
+      name: 'Accepted Person',
+      competitionCategory: 'Under 2 years',
+      clubNameSnapshot: 'RWB',
+      status: 'pending',
+      acceptedCompetitorId: null,
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+    const competitor = {
+      _id: competitorId,
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+
+    CompetitorRegistration.findById.mockResolvedValue(registration);
+    Competitor.mockImplementation(function CompetitorMock(data) {
+      Object.assign(competitor, data);
+      return competitor;
+    });
+
+    const res = await request(app)
+      .post(`/api/admin/registrations/${registrationId}/accept`)
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true, username: 'admin' })}`);
+
+    expect(res.status).toBe(200);
+    expect(Competitor).toHaveBeenCalledWith({
+      name: 'Accepted Person',
+      category: 'Under 2 years',
+      location: 'RWB',
+    });
+    expect(competitor.save).toHaveBeenCalledTimes(1);
+    expect(registration.status).toBe('accepted');
+    expect(registration.acceptedCompetitorId).toBe(competitorId);
+    expect(registration.reviewedBy).toBe('admin');
+    expect(registration.save).toHaveBeenCalledTimes(1);
+    expect(res.body.success).toBe(true);
+  });
+
+  test('POST /api/admin/registrations/:id/reject marks pending registration rejected', async () => {
+    const registrationId = new mongoose.Types.ObjectId().toString();
+    const registration = {
+      _id: registrationId,
+      status: 'pending',
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+    CompetitorRegistration.findById.mockResolvedValue(registration);
+
+    const res = await request(app)
+      .post(`/api/admin/registrations/${registrationId}/reject`)
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true, username: 'admin' })}`)
+      .send({ reason: 'Not eligible' });
+
+    expect(res.status).toBe(200);
+    expect(registration.status).toBe('rejected');
+    expect(registration.rejectionReason).toBe('Not eligible');
+    expect(registration.reviewedBy).toBe('admin');
+    expect(registration.save).toHaveBeenCalledTimes(1);
+    expect(res.body.success).toBe(true);
+  });
+
 });
