@@ -414,6 +414,10 @@ router.get('/admin/registrations', adminOnly, async (req, res) => {
 
 router.delete('/admin/registrations', adminOnly, async (req, res) => {
   try {
+    if (req.body?.confirm !== 'DELETE') {
+      return res.status(400).json({ message: 'Type DELETE to confirm deleting all registrations' });
+    }
+
     const result = await CompetitorRegistration.deleteMany({});
     res.json({ success: true, deletedCount: result.deletedCount || 0 });
   } catch (err) {
