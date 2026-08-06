@@ -83,6 +83,16 @@ router.put('/judges/:id', requireAuth, requireAdmin, async (req, res) => {
 router.delete('/judges/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const judge = await Judge.findById(id).select('username isAdmin');
+
+    if (!judge) {
+      return res.status(404).json({ message: 'Judge not found' });
+    }
+
+    if (judge.isAdmin || String(judge.username || '').toLowerCase() === 'admin') {
+      return res.status(400).json({ message: 'Admin account cannot be deleted' });
+    }
+
     await Assignment.deleteMany({ judgeId: id });
     await Review.deleteMany({ judgeId: id });
     await Category.updateMany({}, { $pull: { visibleToJudges: id } });

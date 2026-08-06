@@ -353,6 +353,9 @@ describe('Express API', () => {
     Assignment.deleteMany.mockResolvedValue({ deletedCount: 1 });
     Review.deleteMany.mockResolvedValue({ deletedCount: 2 });
     Category.updateMany.mockResolvedValue({ modifiedCount: 3 });
+    Judge.findById.mockReturnValue({
+      select: jest.fn().mockResolvedValue({ _id: judgeId, username: 'judge-one', isAdmin: false }),
+    });
     Judge.findByIdAndDelete.mockResolvedValue({ _id: judgeId });
 
     const res = await request(app)
@@ -361,10 +364,29 @@ describe('Express API', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ success: true });
+    expect(Judge.findById).toHaveBeenCalledWith(judgeId);
     expect(Assignment.deleteMany).toHaveBeenCalledWith({ judgeId });
     expect(Review.deleteMany).toHaveBeenCalledWith({ judgeId });
     expect(Category.updateMany).toHaveBeenCalledWith({}, { $pull: { visibleToJudges: judgeId } });
     expect(Judge.findByIdAndDelete).toHaveBeenCalledWith(judgeId);
+  });
+
+  test('DELETE /api/judges/:id prevents deleting admin judge account', async () => {
+    const judgeId = new mongoose.Types.ObjectId().toString();
+    Judge.findById.mockReturnValue({
+      select: jest.fn().mockResolvedValue({ _id: judgeId, username: 'admin', isAdmin: true }),
+    });
+
+    const res = await request(app)
+      .delete(`/api/judges/${judgeId}`)
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: 'Admin account cannot be deleted' });
+    expect(Assignment.deleteMany).not.toHaveBeenCalled();
+    expect(Review.deleteMany).not.toHaveBeenCalled();
+    expect(Category.updateMany).not.toHaveBeenCalled();
+    expect(Judge.findByIdAndDelete).not.toHaveBeenCalled();
   });
 
   test('DELETE /api/categories/:id cascades review deletes', async () => {
