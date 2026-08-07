@@ -11,6 +11,7 @@ const RegistrationSettings = require('../models/RegistrationSettings');
 const RegistrationHeat = require('../models/RegistrationHeat');
 const Club = require('../models/Club');
 const RegistrationTimingCategory = require('../models/RegistrationTimingCategory');
+const RegistrationReviewCategory = require('../models/RegistrationReviewCategory');
 const CompetitorRegistration = require('../models/CompetitorRegistration');
 
 jest.mock('../models/Judge');
@@ -22,6 +23,7 @@ jest.mock('../models/RegistrationSettings');
 jest.mock('../models/RegistrationHeat');
 jest.mock('../models/Club');
 jest.mock('../models/RegistrationTimingCategory');
+jest.mock('../models/RegistrationReviewCategory');
 jest.mock('../models/CompetitorRegistration');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'local-dev-secret-change-me';
@@ -484,6 +486,7 @@ describe('Express API', () => {
   test('POST /api/registration creates manager competitor registration without surname', async () => {
     const clubId = new mongoose.Types.ObjectId();
     const timingCategoryId = new mongoose.Types.ObjectId();
+    const reviewCategoryId = new mongoose.Types.ObjectId();
     const settings = {
       registrationOpen: true,
       publicStyle: 'classic-red',
@@ -500,6 +503,12 @@ describe('Express API', () => {
       name: 'Chipping',
       active: true,
     };
+    const reviewCategory = {
+      _id: reviewCategoryId,
+      name: 'Description',
+      type: 'text',
+      active: true,
+    };
     const savedRegistration = {
       _id: new mongoose.Types.ObjectId(),
       save: jest.fn().mockResolvedValue(undefined),
@@ -508,6 +517,7 @@ describe('Express API', () => {
     RegistrationSettings.findOne.mockResolvedValue(settings);
     Club.findOne.mockResolvedValue(club);
     RegistrationTimingCategory.find.mockResolvedValue([timingCategory]);
+    RegistrationReviewCategory.find.mockResolvedValue([reviewCategory]);
     CompetitorRegistration.mockImplementation(function CompetitorRegistrationMock(data) {
       Object.assign(savedRegistration, data);
       return savedRegistration;
@@ -521,6 +531,7 @@ describe('Express API', () => {
         clubId: String(clubId),
         competitionCategory: 'Over 2 years',
         timings: [{ categoryId: String(timingCategoryId), value: '1:24:15' }],
+        reviewResponses: [{ categoryId: String(reviewCategoryId), value: 'Strong competitor profile' }],
       });
 
     expect(res.status).toBe(201);
@@ -532,6 +543,7 @@ describe('Express API', () => {
       clubNameSnapshot: 'RWB',
       competitionCategory: 'Over 2 years',
       timings: [expect.objectContaining({ categoryNameSnapshot: 'Chipping', value: '1:24:15' })],
+      reviewResponses: [expect.objectContaining({ categoryNameSnapshot: 'Description', type: 'text', value: 'Strong competitor profile' })],
     }));
     expect(savedRegistration.save).toHaveBeenCalledTimes(1);
     expect(res.body.success).toBe(true);

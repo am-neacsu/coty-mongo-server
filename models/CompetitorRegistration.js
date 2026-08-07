@@ -18,6 +18,30 @@ const timingSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
+
+const reviewResponseSchema = new mongoose.Schema({
+  categoryId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'RegistrationReviewCategory',
+    required: true
+  },
+  categoryNameSnapshot: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  type: {
+    type: String,
+    enum: ['rating', 'text'],
+    required: true
+  },
+  value: {
+    type: String,
+    default: '',
+    trim: true
+  }
+}, { _id: false });
+
 const competitorRegistrationSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -56,6 +80,7 @@ const competitorRegistrationSchema = new mongoose.Schema({
     required: true
   },
   timings: [timingSchema],
+  reviewResponses: [reviewResponseSchema],
   status: {
     type: String,
     enum: ['pending', 'accepted', 'rejected'],

@@ -6,6 +6,7 @@ const RegistrationHeat = require('../models/RegistrationHeat');
 const RegistrationSettings = require('../models/RegistrationSettings');
 const Club = require('../models/Club');
 const RegistrationTimingCategory = require('../models/RegistrationTimingCategory');
+const RegistrationReviewCategory = require('../models/RegistrationReviewCategory');
 const CompetitorRegistration = require('../models/CompetitorRegistration');
 const Competitor = require('../models/Competitor');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
@@ -379,6 +380,82 @@ router.delete('/admin/registration-timing-categories/:id', adminOnly, async (req
   } catch (err) {
     console.error('Error deleting registration timing category:', err);
     res.status(500).json({ message: 'Server error deleting registration timing category' });
+  }
+});
+
+
+// ---------------- REGISTRATION REVIEW CATEGORIES ----------------
+router.get('/admin/registration-review-categories', adminOnly, async (req, res) => {
+  try {
+    const categories = await RegistrationReviewCategory.find().sort({ order: 1, name: 1 });
+    res.json(categories);
+  } catch (err) {
+    console.error('Error fetching registration review categories:', err);
+    res.status(500).json({ message: 'Server error fetching registration review categories' });
+  }
+});
+
+router.post('/admin/registration-review-categories', adminOnly, async (req, res) => {
+  try {
+    const { name, type, active, order } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Review category name is required' });
+    }
+    if (!['rating', 'text'].includes(type)) {
+      return res.status(400).json({ message: 'Review category type must be rating or text' });
+    }
+
+    const category = new RegistrationReviewCategory({
+      name: name.trim(),
+      type,
+      active: active !== false,
+      order: Number(order) || 0
+    });
+    await category.save();
+    res.status(201).json(category);
+  } catch (err) {
+    console.error('Error creating registration review category:', err);
+    if (err.code === 11000) {
+      return res.status(409).json({ message: 'Review category already exists' });
+    }
+    res.status(500).json({ message: 'Server error creating registration review category' });
+  }
+});
+
+router.put('/admin/registration-review-categories/:id', adminOnly, async (req, res) => {
+  try {
+    const { name, type, active, order } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Review category name is required' });
+    }
+    if (!['rating', 'text'].includes(type)) {
+      return res.status(400).json({ message: 'Review category type must be rating or text' });
+    }
+
+    const updated = await RegistrationReviewCategory.findByIdAndUpdate(
+      req.params.id,
+      { name: name.trim(), type, active: active !== false, order: Number(order) || 0 },
+      { new: true, runValidators: true }
+    );
+
+    if (!updated) return res.status(404).json({ message: 'Review category not found' });
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating registration review category:', err);
+    if (err.code === 11000) {
+      return res.status(409).json({ message: 'Review category already exists' });
+    }
+    res.status(500).json({ message: 'Server error updating registration review category' });
+  }
+});
+
+router.delete('/admin/registration-review-categories/:id', adminOnly, async (req, res) => {
+  try {
+    await RegistrationReviewCategory.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting registration review category:', err);
+    res.status(500).json({ message: 'Server error deleting registration review category' });
   }
 });
 

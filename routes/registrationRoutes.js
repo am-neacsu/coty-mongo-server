@@ -6,6 +6,7 @@ const Club = require('../models/Club');
 const RegistrationHeat = require('../models/RegistrationHeat');
 const RegistrationSettings = require('../models/RegistrationSettings');
 const RegistrationTimingCategory = require('../models/RegistrationTimingCategory');
+const RegistrationReviewCategory = require('../models/RegistrationReviewCategory');
 const CompetitorRegistration = require('../models/CompetitorRegistration');
 
 const router = express.Router();
@@ -108,14 +109,16 @@ router.post('/registration/access', async (req, res) => {
 
 router.get('/registration/public-config', requireRegistrationAccess, async (req, res) => {
   try {
-    const [clubs, timingCategories] = await Promise.all([
+    const [clubs, timingCategories, reviewCategories] = await Promise.all([
       Club.find({ active: true }).sort({ name: 1 }),
-      RegistrationTimingCategory.find({ active: true }).sort({ order: 1, name: 1 })
+      RegistrationTimingCategory.find({ active: true }).sort({ order: 1, name: 1 }),
+      RegistrationReviewCategory.find({ active: true }).sort({ order: 1, name: 1 })
     ]);
 
     res.json({
       clubs,
       timingCategories,
+      reviewCategories,
       competitionCategories: COMPETITION_CATEGORIES
     });
   } catch (err) {
@@ -126,7 +129,7 @@ router.get('/registration/public-config', requireRegistrationAccess, async (req,
 
 router.post('/registration', requireRegistrationAccess, async (req, res) => {
   try {
-    const { name, clubId, competitionCategory, timings } = req.body;
+    const { name, clubId, competitionCategory, timings, reviewResponses } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Name is required' });
@@ -145,7 +148,10 @@ router.post('/registration', requireRegistrationAccess, async (req, res) => {
       return res.status(404).json({ message: 'Club not found' });
     }
 
-    const timingCategories = await RegistrationTimingCategory.find({ active: true });
+    const [timingCategories, reviewCategories] = await Promise.all([
+      RegistrationTimingCategory.find({ active: true }),
+      RegistrationReviewCategory.find({ active: true })
+    ]);
     const submittedTimingMap = new Map(
       Array.isArray(timings)
         ? timings.map(t => [String(t?.categoryId || ''), String(t?.value || '').trim()])
@@ -163,6 +169,24 @@ router.post('/registration', requireRegistrationAccess, async (req, res) => {
       value: submittedTimingMap.get(String(cat._id))
     }));
 
+    const submittedReviewMap = new Map(
+      Array.isArray(reviewResponses)
+        ? reviewResponses.map(r => [String(r?.categoryId || ''), String(r?.value || '').trim()])
+        : []
+    );
+
+    const missingReview = reviewCategories.find(cat => !submittedReviewMap.get(String(cat._id)));
+    if (missingReview) {
+      return res.status(400).json({ message: `Registration information is required for ${missingReview.name}` });
+    }
+
+    const cleanReviewResponses = reviewCategories.map(cat => ({
+      categoryId: cat._id,
+      categoryNameSnapshot: cat.name,
+      type: cat.type,
+      value: submittedReviewMap.get(String(cat._id))
+    }));
+
     const registration = new CompetitorRegistration({
       name: name.trim(),
       surname: '',
@@ -171,7 +195,8 @@ router.post('/registration', requireRegistrationAccess, async (req, res) => {
       regionId: club.regionId || null,
       regionNameSnapshot: club.regionNameSnapshot || '',
       competitionCategory,
-      timings: cleanTimings
+      timings: cleanTimings,
+      reviewResponses: cleanReviewResponses
     });
 
     await registration.save();
